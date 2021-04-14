@@ -1,22 +1,95 @@
 import requests
 import pandas as pd
+import time
 
 
-url = "https://api.opensea.io/api/v1/assets"
+def paginate(max_per_page, limit, url):
 
-# update query string for desired results
-querystring = {"order_direction":"desc","offset":"0","limit":"20"}
+    # Use offset and max_per_page to paginate
+    result_data     = []
+    appended_data   = []
+    get_data        = True
+    api_call        = 0
+    result_count    = 0
+    offset          = 0
 
-# add headers/SSL if necessary
-response = requests.request("GET", url, params=querystring)
-j = response.json()
+    while get_data == True:
 
-# create dataframe with one columns of json strings
-df = pd.DataFrame.from_dict(j)
+        api_call+=1
+        print(f"offset={offset}")
 
-# split out json assets to columns
-assets_normalized = pd.json_normalize(df.assets)
+        querystring = {"order_direction":"desc","offset":offset, "limit":limit}
 
-print(assets_normalized)
+        # GET API response
+        response = requests.request("GET", url, params=querystring)
+        j = response.json()
 
-assets_normalized.to_csv('assets.csv', index=False)
+        # create dataframe with one columns of json strings
+        df = pd.DataFrame.from_dict(j)
+
+        # split out json assets to columns
+        results = pd.json_normalize(df.assets)
+
+        print(f'Result preview from offset = {offset}')
+        print(results.head())
+
+        result_count = len(results)
+        print(f"Records returned in API call {api_call}: ", result_count)
+
+        # error handling: if API call has zero records
+        if result_count == 0:
+            get_data = False
+        # Keep calling API if length of appended data is less than Limit
+        elif len(appended_data) < limit-max_per_page:
+            #time.sleep(2)
+
+            result_data.append(results)
+            appended_data = pd.concat(result_data)
+            print(f"Cumulative results have {len(appended_data)}")
+            offset = offset + max_per_page
+            print(f'Adding to result_data, offset set to {str(offset)}')
+            get_data = True
+        # Final API call
+        else:
+            try:
+                result_data.append(results)
+                appended_data = pd.concat(result_data)
+                print(f'Adding final data to result_data, cumulative results have {str(len(appended_data))} records. Setting get_data = False.')
+            except:
+                print(f'No Results to append! Setting get_data = False')
+
+            get_data = False
+
+    print(f"Iterations finished. Results have {len(appended_data)} records.")
+
+    # subset to columns of interest
+    final_data = appended_data[[
+        'id',
+        'name',
+        'description',
+        'traits',
+        'asset_contract.address',
+        'asset_contract.asset_contract_type',
+        'asset_contract.created_date',
+        'asset_contract.name',
+        'asset_contract.description',
+        'collection.description',
+        'collection.name',
+        'last_sale.total_price',
+        'last_sale.payment_token.symbol',
+        'last_sale.event_timestamp',
+        'last_sale.transaction.timestamp',
+        'last_sale.transaction.to_account.user.username'
+    ]]
+
+    print("Dtypes for final data:")
+    print(final_data.dtypes)
+    #TODO: possibly format dates
+
+    final_data.to_csv(f'opensea_asset_data_with_limit={limit}.csv', index=False)
+
+    return appended_data
+
+
+
+appended_data = paginate(max_per_page=50, limit=150, url = "https://api.opensea.io/api/v1/assets?asset_contract_address=0x79986af15539de2db9a5086382daeda917a9cf0c")
